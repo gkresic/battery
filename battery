@@ -1,0 +1,129 @@
+#!/bin/bash
+
+BATTERY_NAME=`ls -1 /sys/class/power_supply/ | grep BAT`
+
+if ! [ -n "${BATTERY_NAME}" ]; then
+
+	echo
+	echo "Couldn't find any battery in /sys/class/power_supply/"
+	echo
+
+	exit 1
+
+fi
+
+BATTERY_PATH=/sys/class/power_supply/${BATTERY_NAME}
+
+print_current_state() {
+	echo
+	echo "Current settings:"
+	echo
+	echo -e "\tcharge_behaviour: `cat ${BATTERY_PATH}/charge_behaviour`"
+	echo -e "\tstart_threshold:  `cat ${BATTERY_PATH}/charge_control_start_threshold`"
+	echo -e "\tend_threshold:    `cat ${BATTERY_PATH}/charge_control_end_threshold`"
+
+	ENERGY_NOW=`cat ${BATTERY_PATH}/energy_now`
+	ENERGY_FULL=`cat ${BATTERY_PATH}/energy_full`
+	ENERGY_PERCENT=$(( ($ENERGY_NOW*100)/$ENERGY_FULL ))
+	echo
+        echo "Current state:"
+        echo
+        echo -e "\tcharge: $ENERGY_PERCENT%"
+        echo -e "\tstatus: `cat ${BATTERY_PATH}/status`"
+}
+
+# need to sleep a bit to give the battery some time to respond to the change in charge_behaviour
+rest_a_bit() {
+	sleep 1
+}
+
+echo
+echo "Detected battery ${BATTERY_NAME} at ${BATTERY_PATH}"
+
+if ! [ -n "${1}" ]; then
+
+	echo
+	echo "Usage: [full|<max>|<min> <max>|discharge]"
+	echo
+	echo -e "\tfull        Charge to max"
+	echo -e "\t<max>       Do not charge above <max> percentage"
+	echo -e "\t<min> <max> Start charging once below <min> percentage, but do not charge above <max> percentage"
+	echo -e "\tdischarge   Force discharging, even if AC is connected (DON'T FORGET TO TURN OFF! :) )"
+
+	print_current_state
+
+	echo
+	exit 1
+
+fi
+
+if [ "${1}" = "full" ]; then
+
+	echo
+	echo "Charging to full!"
+
+	echo "auto" > ${BATTERY_PATH}/charge_behaviour
+	echo "100" > ${BATTERY_PATH}/charge_control_start_threshold
+	echo "100" > ${BATTERY_PATH}/charge_control_end_threshold
+
+	rest_a_bit
+	print_current_state
+
+	echo
+	exit 0
+
+fi
+
+if echo "${1}" | grep -qP "^\d+$"; then
+
+	if ! [ -n "${2}" ]; then
+		# one params
+		MIN=${1}
+		MAX=${1}
+	else
+		MIN=${1}
+		# two params
+		if ! echo "${2}" | grep -qP "^\d+$"; then
+			echo
+			echo "Invalid value for second percentage (max): ${2}"
+
+			echo
+			exit 1
+		fi
+		MAX=${2}
+	fi
+
+	echo
+	echo "Charging to [${MIN}, ${MAX}]"
+
+	echo "auto" > ${BATTERY_PATH}/charge_behaviour
+	echo ${MIN} > ${BATTERY_PATH}/charge_control_start_threshold
+	echo ${MAX} > ${BATTERY_PATH}/charge_control_end_threshold
+
+	rest_a_bit
+	print_current_state
+
+	echo
+	exit 0
+fi
+
+if [ "${1}" = "discharge" ]; then
+
+	echo
+	echo "FORCING DISCHARGE!"
+
+	echo "force-discharge" > ${BATTERY_PATH}/charge_behaviour
+
+	rest_a_bit
+	print_current_state
+
+	echo
+	exit 0
+
+fi
+
+echo
+echo "Unknown parameter: ${1}"
+
+echo
+exit 2
